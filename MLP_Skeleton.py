@@ -134,10 +134,19 @@ class MLP(object):
         dLdW2 = np.matmul(a1.T, a2 - y)
         dLdb2 = a2 - y
 
-        dLdW1 = np.matmul(np.matmul(x.T, y - a2), self.W2.T)
-        dLdb1 = np.matmul(y - a2, self.W2.T)
+        dLdW1 = np.matmul(np.matmul(x.T, a2-y), self.W2.T)
+        dLdb1 = np.matmul(a2-y, self.W2.T)
         dLdW1 = np.asarray([dLdW1.T[j] if z1[0, j] > 0 else np.zeros(len(dLdW1.T[j])) for j in range(len(dLdW1.T))]).T
         dLdb1 = np.asarray([dLdb1.T[j] if z1[0, j] > 0 else np.zeros(len(dLdb1.T[j])) for j in range(len(dLdb1.T))]).T
+
+        return dLdW1, dLdb1, dLdW2, dLdb2
+
+    def get_gradients_Sigmoid(self, y, a2, a1, z1, x):
+        dLdW2 = np.matmul(a1.T, a2 - y)
+        dLdb2 = a2 - y
+
+        dLdW1 = np.matmul(np.matmul(x.T, np.multiply(a2 - y, np.multiply(a2, (1-a2)))), self.W2.T)
+        dLdb1 = np.matmul(a2 - y, self.W2.T)
 
         return dLdW1, dLdb1, dLdW2, dLdb2
 
@@ -187,12 +196,14 @@ class MLP(object):
             y = y_batch[m]
             z1 = LinearTransform(self.W1, self.b1).forward(x)
             a1 = ReLU().forward(z1)
+            # a1 = SigmoidCrossEntropy().sigmoid(z1)
             z2 = LinearTransform(self.W2, self.b2).forward(a1)
             a2 = SigmoidCrossEntropy().sigmoid(z2)
             # print "\n\n", "Pred", a2, "Input", x, "Output", y
             L = sum(SigmoidCrossEntropy().xEntropy(a2, y)[0])
             loss += L
             gW1, gb1, gW2, gb2 = self.get_gradients(y, a2, a1, z1, x)
+            # gW1, gb1, gW2, gb2 = self.get_gradients_Sigmoid(y, a2, a1, z1, x)
             dLdW1 += gW1
             dLdb1 += gb1
             dLdW2 += gW2
@@ -258,6 +269,9 @@ class DataParser(object):
         batch = input_set[0:batch_size]
         return batch.reshape(len(batch), 1, len(batch[0]))/255.0
 
+    def get_input_batch_p(self, batch):
+        """ Get a minibatch from an input data set. """
+        return batch.reshape(len(batch), 1, len(batch[0]))/255.0
 
     def get_output(self, label_set, index=None):
         """
@@ -284,6 +298,17 @@ class DataParser(object):
             # print label
             # print baqtch[l]
             labels.append(label)
+        return np.asarray(labels)
+
+    def get_output_batch_p(self, batch):
+        """ Get a minibatch from an output set. """
+        labels = []
+        for l in range(len(batch)):
+            label = np.zeros((1, self.mlp.dimensions[2]))
+            label[0, batch[l][0]] = 1
+            # print label
+            # print baqtch[l]
+            labels.append(label)
 
         # print np.asarray(labels)q
 
@@ -292,8 +317,6 @@ class DataParser(object):
         return np.asarray(labels)
 # #
 if __name__ == '__main__':
-
-
     data = cPickle.load(open('cifar_2class_py2.p', 'rb'))
     np.random.seed(2)
 
@@ -303,39 +326,45 @@ if __name__ == '__main__':
     test_y = data['test_labels']
 
     num_examples, input_dims = train_x.shape
-    hidden_units = 100
+    hidden_units = 50
     output_dims = 2
 
-    num_epochs = 500
-    # num_batches = 1000
+    num_epochs = 2000
+    batch_size = 32
+    learning_rate = 0.005
 
     mlp = MLP(input_dims, hidden_units, output_dims)
 
     losses = []
 
-    # x = DataParser(mlp).get_input(train_x, 2)
-    # y = DataParser(mlp).get_output(train_y, 2)
-
+    print "ReLU {0} Batch, {1} LR, {2} Hidden Units".format(batch_size, learning_rate, hidden_units)
+    ct = 0
     for i in range(num_epochs):
-        # train_x, train_y = unison_shuffle(train_x, train_y)
-        x_batch = DataParser(mlp).get_input_batch(train_x, 4)
-        y_batch = DataParser(mlp).get_output_batch(train_y, 4)
-        l = mlp.train_minibatch(x_batch, y_batch, learning_rate=0.0001)
-        print l
-        losses.append(l)
+        p = np.random.choice(np.arange(0, num_examples), batch_size)
+        x_batch = DataParser(mlp).get_input_batch_p(train_x[p])
+        y_batch = DataParser(mlp).get_output_batch_p(train_y[p])
+        l = mlp.train_minibatch(x_batch, y_batch, learning_rate)
+        print ct, " LOSS: ", l/batch_size
+        ct += 1
+        losses.append(l/batch_size)
     Visualizations().plot_loss(losses)
-    # for i in range(num_epochs):
-    #     input = DataParser(mlp).get_input(train_x)
-    #     label = DataParser(mlp).get_output(train_y)
-    #     # print "True Value: ", label
-    #     output = mlp.predict(input)
-    #     # print "Initial Prediction: ", output
-    #     # print SigmoidCrossEntropy().xEntropy(output, label)
-    #     L = sum(SigmoidCrossEntropy().xEntropy(output, label)[0])
-    #     # print L
-    #     losses.append(L)
-    #     mlp.train_sgd(input, label, learning_rate=10e-1)
-    # Visualizations().plot_loss(losses)
-    # # print "Final Prediction: ", mlp.predict(input)
 
+    p = np.random.choice(np.arange(0, num_examples), 1000)
+    x_batch = DataParser(mlp).get_input_batch_p(train_x[p])
+    y_batch = DataParser(mlp).get_output_batch_p(train_y[p])
+    ct =0
+    for i in range(1000):
+        out = mlp.predict(x_batch[i])[0]
+        if out.argmax() == y_batch[i][0].argmax():
+            ct+=1
+    print "ACCURACY: ", ct/1000.0
 
+    p = np.random.choice(np.arange(0, num_examples), 32)
+    x_batch = DataParser(mlp).get_input_batch_p(train_x[p])
+    for i in range(32):
+        Visualizations.visualize_img(np.transpose(np.reshape(x_batch[i],(3,32,32)),(1,2,0)))
+        out = mlp.predict(x_batch[i])[0]
+        if (out.argmax()) == 0:
+            print "AIRPLANE"
+        else:
+            print "SHIP"
